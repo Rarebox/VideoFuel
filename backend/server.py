@@ -302,7 +302,7 @@ async def generate_script(request: ScriptRequest):
             hook = hook_match.group(1).strip()
         
         # Extract sections
-        section_matches = re.findall(r'(?:BÖLÜM|SECTION)\s*\d*[:\s]*([^-\n]*?)(?:\s*-\s*)?([^]*?)(?=(?:BÖLÜM|SECTION|OUTRO)|$)', response, re.IGNORECASE)
+        section_matches = re.findall(r'(?:BÖLÜM|SECTION)\s*\d*[:\s]*([^-\n]*?)(?:\s*-\s*)?(.*?)(?=(?:BÖLÜM|SECTION|OUTRO)|$)', response, re.IGNORECASE | re.DOTALL)
         for title, content in section_matches:
             if title.strip() or content.strip():
                 sections.append({
