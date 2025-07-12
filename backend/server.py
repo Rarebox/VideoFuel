@@ -290,32 +290,38 @@ async def generate_script(request: ScriptRequest):
     try:
         response = await query_openrouter(request.model, messages, temperature=0.7, max_tokens=3000)
         
-        # Parse response
+        # Parse response - improved parsing logic
         lines = response.split('\n')
         hook = ""
         sections = []
         outro = ""
         
-        current_section = None
-        for line in lines:
-            line = line.strip()
-            if line.startswith('HOOK:'):
-                hook = line.split(':', 1)[1].strip()
-            elif line.startswith('BÖLÜM') or line.startswith('SECTION'):
-                if current_section:
-                    sections.append(current_section)
-                parts = line.split(' - ', 1)
-                current_section = {
-                    "title": parts[0].split(':', 1)[-1].strip(),
-                    "content": parts[1] if len(parts) > 1 else ""
-                }
-            elif line.startswith('OUTRO:'):
-                outro = line.split(':', 1)[1].strip()
-            elif current_section and line:
-                current_section["content"] += " " + line
+        # Extract hook
+        hook_match = re.search(r'HOOK[:\s]*(.*?)(?=BÖLÜM|SECTION|OUTRO|$)', response, re.IGNORECASE | re.DOTALL)
+        if hook_match:
+            hook = hook_match.group(1).strip()
         
-        if current_section:
-            sections.append(current_section)
+        # Extract sections
+        section_matches = re.findall(r'(?:BÖLÜM|SECTION)\s*\d*[:\s]*([^-\n]*?)(?:\s*-\s*)?([^]*?)(?=(?:BÖLÜM|SECTION|OUTRO)|$)', response, re.IGNORECASE)
+        for title, content in section_matches:
+            if title.strip() or content.strip():
+                sections.append({
+                    "title": title.strip() or f"Section {len(sections) + 1}",
+                    "content": content.strip()
+                })
+        
+        # Extract outro
+        outro_match = re.search(r'OUTRO[:\s]*(.*?)$', response, re.IGNORECASE | re.DOTALL)
+        if outro_match:
+            outro = outro_match.group(1).strip()
+        
+        # Fallback parsing if regex fails
+        if not hook and not sections and not outro:
+            lines = [line.strip() for line in response.split('\n') if line.strip()]
+            if len(lines) >= 3:
+                hook = lines[0]
+                sections = [{"title": f"Section {i+1}", "content": line} for i, line in enumerate(lines[1:-1])]
+                outro = lines[-1]
         
         # Store in database
         await db.generations.insert_one({
