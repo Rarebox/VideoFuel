@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: videofuel-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port 8000
+    envVars:
+      - key: MONGO_URL
+        value: mongodb+srv://caglarusta:z9i88ZJurAxOvlXt@cluster0.zfsjpnh.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
+      - key: DB_NAME
+        value: sample_mflix
+      - key: OPENROUTER_API_KEY
+        value: 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
+
+  - type: static
+    name: videofuel-frontend
+    buildCommand: cd frontend && npm install && npm run build
+    publishPath: frontend/build
+    envVars:
+      - key: REACT_APP_BACKEND_URL
+        value: https://videofuel-api.onrender.com
