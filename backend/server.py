@@ -118,7 +118,7 @@ async def query_openrouter(model: str, messages: List[Dict], temperature: float 
                 json=payload,
                 headers=headers
             )
-            
+            logging.info(f"OpenRouter response: {response.text}")
             if response.status_code != 200:
                 raise HTTPException(status_code=500, detail=f"OpenRouter API error: {response.text}")
             
@@ -148,41 +148,77 @@ def get_language_prompts(language: str):
             "thumbnail_prompt": "Generate 3 short text suggestions (2-5 words) for thumbnail design based on the given title."
         }
 
-def calculate_seo_scores(title: str, description: str, hashtags: List[str], language: str) -> SEOScores:
-    """Calculate SEO scores for content"""
-    
-    # Clickbait Score (0-100)
-    clickbait_words = ["amazing", "incredible", "shocking", "ultimate", "secret", "revealed", 
-                       "must-see", "unbelievable", "epic", "insane"] if language == "en" else [
-                       "inanılmaz", "muhteşem", "şok", "son", "gizli", "açığa çıktı", 
-                       "mutlaka izle", "inanılmaz", "epik", "çılgın"]
-    
-    clickbait_score = min(100, len([word for word in clickbait_words if word.lower() in title.lower()]) * 20 + 40)
-    
-    # Length Score (0-100)
-    title_length = len(title)
-    if 50 <= title_length <= 70:
-        length_score = 100
-    elif 40 <= title_length <= 80:
-        length_score = 80
-    else:
-        length_score = max(0, 100 - abs(60 - title_length) * 3)
-    
-    # Keyword Relevance Score (based on hashtag relevance)
-    title_words = set(title.lower().split())
-    hashtag_words = set(" ".join(hashtags).lower().replace("#", "").split())
-    common_words = title_words.intersection(hashtag_words)
-    keyword_relevance_score = min(100, len(common_words) * 15 + 30)
-    
-    # Overall SEO Score
-    overall_seo_score = int((clickbait_score + length_score + keyword_relevance_score) / 3)
-    
-    return SEOScores(
-        clickbait_score=clickbait_score,
-        keyword_relevance_score=keyword_relevance_score,
-        length_score=length_score,
-        overall_seo_score=overall_seo_score
+async def calculate_seo_scores(title: str, description: str, hashtags: List[str], language: str, model: str):
+    prompt = f"""
+Sen bir YouTube SEO uzmanısın. Kullanıcı sana bir başlık, açıklama ve hashtag listesi verdi.
+
+Lütfen aşağıdaki kriterlere göre 0-100 arasında puan ver:
+
+1. Dikkat Çekme Skoru: Başlık ne kadar dikkat çekici?
+2. Anahtar Kelime Uyumu: Başlık ile açıklama ve hashtag'ler ne kadar örtüşüyor?
+3. Uzunluk Skoru: Açıklama uzunluğu ideal mi? (300-400 karakter önerilen)
+
+Cevap formatı:
+Dikkat Çekme Skoru: ...
+Anahtar Kelime Uyumu: ...
+Uzunluk Skoru: ...
+SEO Yorumları:
+- [kısa öneri]
+- [kısa öneri]
+
+Veriler:
+Başlık: {title}
+Açıklama: {description}
+Hashtag'ler: {' '.join(hashtags)}
+"""
+    messages = [
+        {"role": "system", "content": "Sen deneyimli bir YouTube SEO uzmanısın. Gerçekçi ve açıklayıcı puanlama yap."},
+        {"role": "user", "content": prompt}
+    ]
+    response = await query_openrouter(model, messages)
+
+    # Init
+    scores = {
+        "clickbait_score": 0,
+        "keyword_relevance_score": 0,
+        "length_score": 0,
+        "overall_seo_score": 0
+    }
+    recommendations = []
+
+    # ✅ Parse lines properly
+    lines = response.splitlines()
+    for line in lines:
+        line = line.strip()
+
+        if "Dikkat Çekme Skoru" in line:
+            match = re.search(r"Dikkat Çekme Skoru:\s*(\d+)", line)
+            if match:
+                scores["clickbait_score"] = int(match.group(1))
+
+        elif "Anahtar Kelime Uyumu" in line:
+            match = re.search(r"Anahtar Kelime Uyumu:\s*(\d+)", line)
+            if match:
+                scores["keyword_relevance_score"] = int(match.group(1))
+
+        elif "Uzunluk Skoru" in line:
+            match = re.search(r"Uzunluk Skoru:\s*(\d+)", line)
+            if match:
+                scores["length_score"] = int(match.group(1))
+
+        elif line.startswith("-"):
+            recommendations.append(line[1:].strip())
+
+    # ✅ Compute overall
+    scores["overall_seo_score"] = round(
+        (scores["clickbait_score"] + scores["keyword_relevance_score"] + scores["length_score"]) / 3
     )
+
+    # ✅ Logging
+    logging.info("Parsed SEO scores: %s", scores)
+    logging.info("Recommendations: %s", recommendations)
+
+    return scores, recommendations
 
 # API Routes
 @api_router.get("/")
@@ -197,17 +233,30 @@ async def get_available_models():
 async def generate_titles(request: GenerationRequest):
     """Generate 5 SEO-optimized YouTube titles"""
     prompts = get_language_prompts(request.language)
-    
+
     messages = [
         {"role": "system", "content": prompts["system"]},
         {"role": "user", "content": f"{prompts['title_prompt']}\n\nKonu: {request.topic}\n\nSadece 5 başlığı liste halinde ver, her satırda bir başlık."}
     ]
-    
+
     try:
         response = await query_openrouter(request.model, messages)
-        titles = [line.strip().lstrip('1234567890.-) ') for line in response.split('\n') if line.strip()][:5]
-        
-        # Store in database
+
+        # Log yanıt
+        logging.info(f"OpenRouter response: {response}")
+
+        # Satırları ayrıştır
+        titles = []
+        for line in response.split('\n'):
+            clean = line.strip()
+            if not clean:
+                continue
+            match = re.match(r'^\d+[\.\-\)]?\s*(.*)', clean)
+            titles.append(match.group(1).strip() if match else clean)
+            if len(titles) == 5:
+                break
+
+        # Veritabanına kaydet
         await db.generations.insert_one({
             "id": str(uuid.uuid4()),
             "type": "titles",
@@ -217,14 +266,17 @@ async def generate_titles(request: GenerationRequest):
             "titles": titles,
             "timestamp": datetime.utcnow()
         })
-        
+
         return TitleGenerationResponse(
             titles=titles,
             language=request.language,
             model_used=SUPPORTED_MODELS[request.model]
         )
+
     except Exception as e:
+        logging.error(f"generate_titles error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @api_router.post("/generate-description", response_model=DescriptionResponse)
 async def generate_description(request: DescriptionRequest):
@@ -382,37 +434,26 @@ async def generate_thumbnail(request: ThumbnailRequest):
 
 @api_router.post("/analyze-seo", response_model=SEOResponse)
 async def analyze_seo(request: SEORequest):
-    """Analyze SEO scores for content"""
     try:
-        scores = calculate_seo_scores(request.title, request.description, request.hashtags, request.language)
-        
-        # Generate recommendations
-        recommendations = []
-        if scores.clickbait_score < 60:
-            rec = "Başlığınızı daha dikkat çekici hale getirin" if request.language == "tr" else "Make your title more attention-grabbing"
-            recommendations.append(rec)
-        if scores.length_score < 80:
-            rec = "Başlık uzunluğunu 50-70 karakter arasında tutun" if request.language == "tr" else "Keep title length between 50-70 characters"
-            recommendations.append(rec)
-        if scores.keyword_relevance_score < 70:
-            rec = "Hashtag'lerinizin başlıkla daha uyumlu olmasını sağlayın" if request.language == "tr" else "Make hashtags more relevant to your title"
-            recommendations.append(rec)
-        
-        # Store in database
-        await db.seo_analyses.insert_one({
-            "id": str(uuid.uuid4()),
-            "title": request.title,
-            "description": request.description,
-            "hashtags": request.hashtags,
-            "language": request.language,
-            "scores": scores.dict(),
-            "recommendations": recommendations,
-            "timestamp": datetime.utcnow()
-        })
-        
-        return SEOResponse(scores=scores, recommendations=recommendations)
+        scores_dict, recommendations = await calculate_seo_scores(
+            title=request.title,
+            description=request.description,
+            hashtags=request.hashtags,
+            language=request.language,
+            model=request.model if hasattr(request, "model") else "gpt4o"
+        )
+
+        # ⬇️ BURASI ÖNEMLİ: dict → Pydantic model
+        scores = SEOScores(**scores_dict)
+
+        return SEOResponse(
+            scores=scores,
+            recommendations=recommendations
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.error(f"SEO Analysis error: {e}")
+        raise HTTPException(status_code=500, detail="SEO analizi başarısız.")
+
 
 # Include the router in the main app
 app.include_router(api_router)

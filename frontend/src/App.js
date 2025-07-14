@@ -23,6 +23,11 @@ function App() {
   const [script, setScript] = useState(null);
   const [thumbnailTexts, setThumbnailTexts] = useState([]);
   const [seoScores, setSeoScores] = useState(null);
+  const [selectedThumbnailText, setSelectedThumbnailText] = useState(null);
+  const fullScriptText = script
+  ? `🎯 Başlık:\n${selectedTitle}\n\n📄 Açıklama:\n${description}\n\n🏷️ Hashtag'ler:\n${hashtags.join(" ")}\n\n📜 Video Senaryosu:\n${script.hook}\n\n${script.sections.map((s, i) => `Bölüm ${i+1} - ${s.title}:\n${s.content}`).join("\n\n")}\n\n🔚 Outro:\n${script.outro}`
+  : "";
+  const [seoRecommendations, setSeoRecommendations] = useState([]);
   
   // API calls
   const generateTitles = async () => {
@@ -103,25 +108,30 @@ function App() {
     setIsLoading(false);
   };
 
-  const analyzeSEO = async () => {
-    if (!selectedTitle || !description || !hashtags.length) return;
-    
-    setIsLoading(true);
-    try {
-      const response = await axios.post(`${API}/analyze-seo`, {
-        title: selectedTitle,
-        description,
-        hashtags,
-        language
-      });
-      setSeoScores(response.data);
-      setCurrentStep(6);
-    } catch (error) {
-      console.error("Error analyzing SEO:", error);
-      alert("Error analyzing SEO. Please try again.");
-    }
-    setIsLoading(false);
-  };
+ const analyzeSEO = async () => {
+  if (!selectedTitle || !description || !hashtags.length) return;
+
+  setIsLoading(true);
+  try {
+    const response = await axios.post(`${API}/analyze-seo`, {
+      title: selectedTitle,
+      description,
+      hashtags,
+      language
+    });
+
+    console.log("SEO Response:", response.data);
+
+    setSeoScores(response.data.scores);
+    setSeoRecommendations(response.data.recommendations); // 🟢 doğru yapı
+    setCurrentStep(6);
+  } catch (error) {
+    console.error("Error analyzing SEO:", error);
+    alert("Error analyzing SEO. Please try again.");
+  }
+  setIsLoading(false);
+};
+
 
   const resetFlow = () => {
     setCurrentStep(1);
@@ -258,6 +268,12 @@ function App() {
                     </div>
                   </div>
                 ))}
+                <button
+  onClick={generateTitles}
+  className="w-full mt-4 bg-yellow-500 text-white py-2 rounded hover:bg-yellow-600 transition"
+>
+  {language === "en" ? "Show More Titles" : "Daha Fazla Başlık"}
+</button>
                 <div className="flex gap-4">
                   <button
                     onClick={() => setCurrentStep(1)}
@@ -291,13 +307,23 @@ function App() {
                       {description}
                     </div>
                   </div>
+                  <button
+  onClick={generateDescription}
+  className="mt-3 bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 transition"
+>
+  {language === "en" ? "Regenerate Description" : "Açıklamayı Yenile"}
+</button>
                   <div>
                     <h3 className="text-xl font-bold text-white mb-3">{language === "en" ? "Hashtags:" : "Hashtag'ler:"}</h3>
                     <div className="flex flex-wrap gap-2">
                       {hashtags.map((hashtag, index) => (
-                        <span key={index} className="bg-blue-500 text-white px-3 py-1 rounded-full text-sm">
-                          {hashtag}
-                        </span>
+                       <span
+  key={index}
+  onClick={() => setDescription((prev) => `${prev} ${hashtag}`)}
+  className="bg-blue-500 text-white px-3 py-1 rounded-full text-sm cursor-pointer hover:bg-blue-600 transition"
+>
+  {hashtag}
+</span>
                       ))}
                     </div>
                   </div>
@@ -336,12 +362,23 @@ function App() {
                 <input
                   type="number"
                   value={videoLength}
-                  onChange={(e) => setVideoLength(parseInt(e.target.value))}
+                  onChange={(e) => {
+  const newLength = parseInt(e.target.value);
+  setVideoLength(newLength);
+  generateScript(); // otomatik yeniden üret
+}}
                   min="1"
                   max="60"
                   className="bg-white bg-opacity-20 text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-pink-400"
                 />
               </div>
+
+              <button
+  onClick={generateScript}
+  className="mt-4 bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 transition"
+>
+  {language === "en" ? "Regenerate Script" : "Senaryoyu Yenile"}
+</button>
               
               {script && (
                 <div className="space-y-6">
@@ -402,8 +439,12 @@ function App() {
                 <div className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {thumbnailTexts.map((text, index) => (
-                      <div key={index} className="bg-white bg-opacity-20 rounded-lg p-6 text-center">
-                        <div className="text-2xl font-bold text-white mb-2">{text}</div>
+<div
+    key={index}
+    onClick={() => setSelectedThumbnailText(text)}
+    className={`cursor-pointer bg-white bg-opacity-20 rounded-lg p-6 text-center transition-all duration-300 
+      ${selectedThumbnailText === text ? "border-2 border-yellow-400 bg-opacity-30" : "hover:bg-opacity-30"}`}
+  >                        <div className="text-2xl font-bold text-white mb-2">{text}</div>
                         <div className="text-sm text-gray-300">
                           {language === "en" ? "Thumbnail Text" : "Thumbnail Metni"} {index + 1}
                         </div>
@@ -433,117 +474,111 @@ function App() {
             </div>
           )}
 
-          {/* Step 6: SEO Analysis */}
           {currentStep === 6 && seoScores && (
-            <div className="bg-white bg-opacity-10 backdrop-blur-md rounded-xl p-8">
-              <h2 className="text-3xl font-bold text-white mb-6">
-                {language === "en" ? "6. SEO Analysis" : "6. SEO Analizi"}
-              </h2>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                {/* SEO Scores */}
-                <div className="space-y-4">
-                  <div className="bg-white bg-opacity-20 rounded-lg p-4">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-white font-medium">
-                        {language === "en" ? "Clickbait Score" : "Dikkat Çekme Skoru"}
-                      </span>
-                      <span className={`font-bold ${getScoreColor(seoScores.scores.clickbait_score)}`}>
-                        {seoScores.scores.clickbait_score}/100
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-600 rounded-full h-3">
-                      <div 
-                        className={`h-3 rounded-full ${getScoreBg(seoScores.scores.clickbait_score)}`}
-                        style={{width: `${seoScores.scores.clickbait_score}%`}}
-                      ></div>
-                    </div>
-                  </div>
-                  
-                  <div className="bg-white bg-opacity-20 rounded-lg p-4">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-white font-medium">
-                        {language === "en" ? "Keyword Relevance" : "Anahtar Kelime Uyumu"}
-                      </span>
-                      <span className={`font-bold ${getScoreColor(seoScores.scores.keyword_relevance_score)}`}>
-                        {seoScores.scores.keyword_relevance_score}/100
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-600 rounded-full h-3">
-                      <div 
-                        className={`h-3 rounded-full ${getScoreBg(seoScores.scores.keyword_relevance_score)}`}
-                        style={{width: `${seoScores.scores.keyword_relevance_score}%`}}
-                      ></div>
-                    </div>
-                  </div>
-                  
-                  <div className="bg-white bg-opacity-20 rounded-lg p-4">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-white font-medium">
-                        {language === "en" ? "Length Score" : "Uzunluk Skoru"}
-                      </span>
-                      <span className={`font-bold ${getScoreColor(seoScores.scores.length_score)}`}>
-                        {seoScores.scores.length_score}/100
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-600 rounded-full h-3">
-                      <div 
-                        className={`h-3 rounded-full ${getScoreBg(seoScores.scores.length_score)}`}
-                        style={{width: `${seoScores.scores.length_score}%`}}
-                      ></div>
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Overall Score */}
-                <div className="flex items-center justify-center">
-                  <div className="text-center">
-                    <div className="text-6xl font-bold mb-4 bg-gradient-to-r from-pink-400 to-yellow-400 bg-clip-text text-transparent">
-                      {seoScores.scores.overall_seo_score}
-                    </div>
-                    <div className="text-2xl font-bold text-white mb-2">
-                      {language === "en" ? "Overall SEO Score" : "Genel SEO Skoru"}
-                    </div>
-                    <div className={`text-lg font-medium ${getScoreColor(seoScores.scores.overall_seo_score)}`}>
-                      {seoScores.scores.overall_seo_score >= 80 ? (language === "en" ? "Excellent" : "Mükemmel") :
-                       seoScores.scores.overall_seo_score >= 60 ? (language === "en" ? "Good" : "İyi") :
-                       (language === "en" ? "Needs Improvement" : "Geliştirilmeli")}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Recommendations */}
-              {seoScores.recommendations.length > 0 && (
-                <div className="bg-white bg-opacity-20 rounded-lg p-6 mb-6">
-                  <h3 className="text-xl font-bold text-white mb-4">
-                    {language === "en" ? "Recommendations:" : "Öneriler:"}
-                  </h3>
-                  <ul className="space-y-2 text-white">
-                    {seoScores.recommendations.map((rec, index) => (
-                      <li key={index} className="flex items-start">
-                        <span className="text-yellow-400 mr-2">•</span>
-                        {rec}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              
-              <div className="flex gap-4">
-                <button
-                  onClick={() => setCurrentStep(5)}
-                  className="flex-1 bg-gray-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-gray-700 transition-all duration-300"
-                >
-                  {language === "en" ? "Back" : "Geri"}
-                </button>
-                <button
-                  onClick={resetFlow}
-                  className="flex-1 bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-6 rounded-lg hover:from-green-600 hover:to-blue-700 transition-all duration-300"
-                >
-                  {language === "en" ? "Create New Video" : "Yeni Video Oluştur"}
-                </button>
-              </div>
+  <div className="bg-white bg-opacity-10 backdrop-blur-md rounded-xl p-8">
+    <h2 className="text-3xl font-bold text-white mb-6">
+      {language === "en" ? "6. SEO Analysis" : "6. SEO Analizi"}
+    </h2>
+
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+      {/* SEO Scores */}
+      <div className="space-y-4">
+        {[
+          { labelEn: "Clickbait Score", labelTr: "Dikkat Çekme Skoru", value: seoScores.clickbait_score },
+          { labelEn: "Keyword Relevance", labelTr: "Anahtar Kelime Uyumu", value: seoScores.keyword_relevance_score },
+          { labelEn: "Length Score", labelTr: "Uzunluk Skoru", value: seoScores.length_score },
+        ].map((item, idx) => (
+          <div key={idx} className="bg-white bg-opacity-20 rounded-lg p-4">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-white font-medium">
+                {language === "en" ? item.labelEn : item.labelTr}
+              </span>
+              <span className={`font-bold ${getScoreColor(item.value)}`}>
+                {item.value}/100
+              </span>
+            </div>
+            <div className="w-full bg-gray-600 rounded-full h-3">
+              <div
+                className={`h-3 rounded-full ${getScoreBg(item.value)}`}
+                style={{ width: `${item.value}%` }}
+              ></div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Overall Score */}
+      <div className="flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-6xl font-bold mb-4 bg-gradient-to-r from-pink-400 to-yellow-400 bg-clip-text text-transparent">
+            {seoScores.overall_seo_score}
+          </div>
+          <div className="text-2xl font-bold text-white mb-2">
+            {language === "en" ? "Overall SEO Score" : "Genel SEO Skoru"}
+          </div>
+          <div className={`text-lg font-medium ${getScoreColor(seoScores.overall_seo_score)}`}>
+            {seoScores.overall_seo_score >= 80
+              ? language === "en" ? "Excellent" : "Mükemmel"
+              : seoScores.overall_seo_score >= 60
+              ? language === "en" ? "Good" : "İyi"
+              : language === "en" ? "Needs Improvement" : "Geliştirilmeli"}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {/* Recommendations */}
+    {seoScores.recommendations?.length > 0 && (
+      <div className="bg-white bg-opacity-20 rounded-lg p-6 mb-6">
+        <h3 className="text-xl font-bold text-white mb-4">
+          {language === "en" ? "SEO Suggestions" : "SEO Yorumları"}
+        </h3>
+        <ul className="space-y-2 text-white">
+          {seoScores.recommendations.map((rec, index) => (
+            <li key={index} className="flex items-start">
+              <span className="text-yellow-400 mr-2">•</span>
+              {rec}
+            </li>
+          ))}
+        </ul>
+      </div>
+    )}
+
+    <div className="flex gap-4">
+      <button
+        onClick={() => setCurrentStep(5)}
+        className="flex-1 bg-gray-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-gray-700 transition-all duration-300"
+      >
+        {language === "en" ? "Back" : "Geri"}
+      </button>
+      <button
+        onClick={resetFlow}
+        className="flex-1 bg-gradient-to-r from-green-500 to-blue-600 text-white font-bold py-3 px-6 rounded-lg hover:from-green-600 hover:to-blue-700 transition-all duration-300"
+      >
+        {language === "en" ? "Create New Video" : "Yeni Video Oluştur"}
+      </button>
+    </div>
+  
+
+              <div className="mt-8 bg-white bg-opacity-20 p-6 rounded-lg text-white">
+  <h3 className="text-xl font-bold mb-4">📝 Özet</h3>
+  <p><strong>Favori Başlık:</strong> {selectedTitle}</p>
+  <p><strong>Açıklama:</strong> {description}</p>
+  <p><strong>Hashtag'ler:</strong> {hashtags.join(" ")}</p>
+  <p><strong>Thumbnail:</strong> {selectedThumbnailText}</p>
+  <p><strong>Senaryo:</strong></p>
+  <pre className="bg-black bg-opacity-20 p-3 mt-2 rounded-md whitespace-pre-wrap">{script?.hook + "\n\n" + script?.sections?.map(s => s.content).join("\n\n") + "\n\n" + script?.outro}</pre>
+</div>
+<button
+  onClick={() => {
+    navigator.clipboard.writeText(fullScriptText);
+    alert("Tüm içerik panoya kopyalandı!");
+  }}
+  className="bg-green-600 text-white font-bold py-2 px-4 rounded hover:bg-green-700"
+>
+    {language === "en" ? "Copy All" : "Hepsini Kopyala"}
+</button>
+
             </div>
           )}
         </div>
